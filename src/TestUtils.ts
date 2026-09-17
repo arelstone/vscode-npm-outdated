@@ -30,6 +30,7 @@ interface PluginConfigurations {
   identifySecurityAdvisories?: boolean;
   level?: ReleaseType;
   majorUpdateProtection?: boolean;
+  minimumReleaseAge?: number | null;
   parallelProcessesLimit?: number;
 }
 
@@ -39,6 +40,7 @@ const DefaultPluginConfigurations: PluginConfigurations = {
   identifySecurityAdvisories: true,
   level: "patch",
   majorUpdateProtection: true,
+  minimumReleaseAge: null,
   parallelProcessesLimit: 0,
 };
 
@@ -63,6 +65,8 @@ interface SimulatorOptions {
   packagesAdvisories?: Record<string, PackageAdvisory[]>;
 
   packagesInstalled?: Record<string, string> | string;
+
+  packageReleaseTimes?: Record<string, Record<string, string>>;
 
   packagesRepository?: Record<string, string[]>;
 
@@ -185,6 +189,8 @@ export async function vscodeSimulator(options: SimulatorOptions = {}) {
     await (isKnown ? Promise.resolve() : Promise.reject(new Error(`ENOENT: ${file}`)));
   };
 
+  MockedModules.fsPromisesReadFile = (): Promise<string> => Promise.reject(new Error("ENOENT"));
+
   MockedModules.utilsCacheEnabled = (): boolean => options.cacheEnabled === true;
 
   MockedModules.utilsRequestSafe = async <T>({ url }: RequestOptions): Promise<T | undefined> => {
@@ -202,6 +208,7 @@ export async function vscodeSimulator(options: SimulatorOptions = {}) {
           !name.startsWith("@private/")
         ) {
           result = {
+            time: options.packageReleaseTimes?.[name],
             versions: Object.fromEntries(
               options.packagesRepository[name]?.map((version) => [version, { version }]) as [],
             ),
@@ -309,8 +316,14 @@ export async function vscodeSimulator(options: SimulatorOptions = {}) {
     }
 
     if (typeof callbackReal === "function") {
-      if (command === "npm view --json @private/npm-outdated versions") {
-        callbackReal(null, JSON.stringify(options.packagesRepository!["@private/npm-outdated"]));
+      if (command === "npm view --json @private/npm-outdated versions time") {
+        callbackReal(
+          null,
+          JSON.stringify({
+            time: options.packageReleaseTimes?.["@private/npm-outdated"],
+            versions: options.packagesRepository!["@private/npm-outdated"],
+          }),
+        );
 
         return;
       }

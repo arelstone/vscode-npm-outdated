@@ -4,6 +4,8 @@
   "npm-outdated-plus.configuration.level.minor.description": "It will only display an update notice when there is a minor version update (eg from 1.0.0 to 1.1.0).",
   "npm-outdated-plus.configuration.level.patch.description": "It will only display an update notice when there is a patch version update (eg from 1.0.0 to 1.0.1).",
 
+  "npm-outdated-plus.configuration.minimumReleaseAge.description": "Additional minimum age, in hours, for a package release to be suggested as an update. Leave empty or set to `0` to disable this extension-level filter only. A stricter npm, pnpm, Bun, or Yarn policy in the project configuration or global configuration overrides this setting; change that package manager's setting to disable it.",
+
   "npm-outdated-plus.configuration.doItForMeAction.description": "What should be done when clicking the update action button.",
   "npm-outdated-plus.configuration.doItForMeAction.install.description": "Execute the `install` command of the dependency manager.",
   "npm-outdated-plus.configuration.doItForMeAction.update.description": "Execute the `update` command of the dependency manager.",

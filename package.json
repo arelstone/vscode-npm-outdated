@@ -88,6 +88,13 @@
           ],
           "markdownDescription": "%npm-outdated-plus.configuration.level.description%"
         },
+        "npm-outdated-plus.minimumReleaseAge": {
+          "order": 1100,
+          "type": ["number", "null"],
+          "default": null,
+          "minimum": 0,
+          "markdownDescription": "%npm-outdated-plus.configuration.minimumReleaseAge.description%"
+        },
         "npm-outdated-plus.majorUpdateProtection": {
           "order": 2000,
           "type": "boolean",

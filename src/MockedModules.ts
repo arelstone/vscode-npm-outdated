@@ -7,6 +7,7 @@ interface MockedModulesBehavior {
     | ((command: string, options: ExecCallback | undefined, callback?: ExecCallback) => unknown)
     | undefined;
   fsPromisesAccess: ((file: string) => Promise<void>) | undefined;
+  fsPromisesReadFile: ((file: string) => Promise<string>) | undefined;
   utilsCacheEnabled: (() => boolean) | undefined;
   utilsRequestSafe: (<T>(options: RequestOptions) => Promise<T | undefined>) | undefined;
 }
@@ -14,6 +15,7 @@ interface MockedModulesBehavior {
 export const MockedModules: MockedModulesBehavior = {
   childProcessExec: undefined,
   fsPromisesAccess: undefined,
+  fsPromisesReadFile: undefined,
   utilsCacheEnabled: undefined,
   utilsRequestSafe: undefined,
 };

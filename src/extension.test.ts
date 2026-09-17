@@ -35,6 +35,8 @@ vi.mock(import("node:fs/promises"), async (importOriginal) => {
     ...actual,
     access: async (file: string): Promise<void> =>
       MockedModules.fsPromisesAccess?.(file) ?? actual.access(file),
+    readFile: async (file: string): Promise<string> =>
+      MockedModules.fsPromisesReadFile?.(file) ?? actual.readFile(file, "utf-8"),
   } as unknown as typeof actual;
 });
 
@@ -385,6 +387,66 @@ describe("package diagnostics", () => {
     expect(decorations.at(0)).toStrictEqual([icons.checked]);
   });
 
+  it("valid dependency, treats an empty minimum release age as disabled", async () => {
+    expect.assertions(1);
+
+    const { diagnostics } = await vscodeSimulator({
+      configurations: { minimumReleaseAge: null },
+      packageJson: { dependencies: { "npm-outdated": "^1.0.0" } },
+      packagesInstalled: { "npm-outdated": "1.0.0" },
+      packageReleaseTimes: {
+        "npm-outdated": {
+          "1.0.0": "2020-01-01T00:00:00.000Z",
+          "1.0.1": new Date().toISOString(),
+        },
+      },
+      packagesRepository: { "npm-outdated": ["1.0.0", "1.0.1"] },
+    });
+
+    expect(diagnostics.at(0)?.message).toContain("available: 1.0.1");
+  });
+
+  it("valid dependency, ignores releases newer than the configured minimum age", async () => {
+    expect.assertions(2);
+
+    const { diagnostics } = await vscodeSimulator({
+      configurations: { minimumReleaseAge: 24 },
+      packageJson: { dependencies: { "npm-outdated": "^1.0.0" } },
+      packagesInstalled: { "npm-outdated": "1.0.0" },
+      packageReleaseTimes: {
+        "npm-outdated": {
+          "1.0.0": "2020-01-01T00:00:00.000Z",
+          "1.0.1": "2020-01-02T00:00:00.000Z",
+          "1.0.2": new Date().toISOString(),
+        },
+      },
+      packagesRepository: { "npm-outdated": ["1.0.0", "1.0.1", "1.0.2"] },
+    });
+
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics.at(0)?.message).toContain("available: 1.0.1");
+  });
+
+  it("valid dependency, does not report a too-young declared version as unavailable", async () => {
+    expect.assertions(1);
+
+    const { diagnostics } = await vscodeSimulator({
+      configurations: { minimumReleaseAge: 24 },
+      packageJson: { dependencies: { "npm-outdated": "^1.0.2" } },
+      packagesInstalled: { "npm-outdated": "1.0.2" },
+      packageReleaseTimes: {
+        "npm-outdated": {
+          "1.0.0": "2020-01-01T00:00:00.000Z",
+          "1.0.1": "2020-01-02T00:00:00.000Z",
+          "1.0.2": new Date().toISOString(),
+        },
+      },
+      packagesRepository: { "npm-outdated": ["1.0.0", "1.0.1", "1.0.2"] },
+    });
+
+    expect(diagnostics).toStrictEqual([]);
+  });
+
   it("valid dependency, but cannot get latest version (exception case)", async () => {
     expect.assertions(2);
 
@@ -519,6 +581,25 @@ describe("package diagnostics", () => {
 
     expect(diagnostics.at(0)?.message).toContain("Newer version");
     expect(diagnostics.at(0)?.message).toContain("1.0.1");
+  });
+
+  it("package depending on auth respects the minimum release age", async () => {
+    expect.assertions(1);
+
+    const { diagnostics } = await vscodeSimulator({
+      configurations: { minimumReleaseAge: 24 },
+      packageJson: { devDependencies: { "@private/npm-outdated": "^1.0.0" } },
+      packagesInstalled: { "@private/npm-outdated": "1.0.0" },
+      packageReleaseTimes: {
+        "@private/npm-outdated": {
+          "1.0.0": "2020-01-01T00:00:00.000Z",
+          "1.0.1": new Date().toISOString(),
+        },
+      },
+      packagesRepository: { "@private/npm-outdated": ["1.0.0", "1.0.1"] },
+    });
+
+    expect(diagnostics).toStrictEqual([]);
   });
 
   it("package dependes on auth, so npm view will be used (not found)", async () => {

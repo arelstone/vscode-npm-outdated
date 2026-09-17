@@ -9,6 +9,12 @@ export function getLevel(): ReleaseType {
   return workspace.getConfiguration().get<ReleaseType>(`${packageName}.level`)!;
 }
 
+// Minimum age in hours for a release to be considered as an update.
+// Default: undefined (disabled).
+export function getMinimumReleaseAge(): number {
+  return workspace.getConfiguration().get<number | null>(`${packageName}.minimumReleaseAge`) ?? 0;
+}
+
 // Retrieves the action for the "Do it for me!" feature based on the current configuration.
 // Default: "install".
 export function getDoItForMeAction() {

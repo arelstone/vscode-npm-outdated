@@ -131,6 +131,10 @@ export class PackageInfo {
     // If the difference is less than the minimum configured then there is no need for a diagnostic.
     // Eg. "1.0 => 1.1" is a "minor" diff(). By default, we allow any non-prerelease diff() starting from "patch".
     // Pre-releases user-defined will always be recommended.
+    if (!gt(versionLatest, versionNormalized)) {
+      return false;
+    }
+
     const packageDiff = diff(versionLatest, versionNormalized);
 
     return Boolean(
@@ -140,7 +144,7 @@ export class PackageInfo {
 
   // If the user-defined version is a released version (including pre-releases).
   public async isVersionReleased(): Promise<boolean> {
-    const versions = await this.getVersions();
+    const versions = await this.getVersions(false);
 
     return Boolean(versions && maxSatisfying(versions, this.version) !== null);
   }
@@ -220,7 +224,7 @@ export class PackageInfo {
   }
 
   // Get all versions released of this package.
-  public async getVersions(): ReturnType<typeof getPackageVersions> {
-    return getPackageVersions(this.name);
+  public async getVersions(applyMinimumReleaseAge = true): ReturnType<typeof getPackageVersions> {
+    return getPackageVersions(this.name, this.document, applyMinimumReleaseAge);
   }
 }

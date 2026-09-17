@@ -1,5 +1,7 @@
 import { exec } from "node:child_process";
 import type { ExecException } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname } from "node:path";
 
 import { attempt, matchGroups, parseAs, singleton, unsafeCast } from "@rheactor/rheactor-core";
@@ -9,7 +11,7 @@ import type { TextDocument } from "vscode";
 
 import { Cache } from "#/Cache";
 import type { PackageInfo } from "#/PackageInfo";
-import { getCacheLifetime } from "#/Settings";
+import { getCacheLifetime, getMinimumReleaseAge } from "#/Settings";
 import { cacheEnabled, requestSafe } from "#/Utils";
 
 const PACKAGE_VERSION_REGEXP = /^\d+\.\d+\.\d+$/v;
@@ -43,10 +45,12 @@ export enum PackageManager {
   NPM = 0,
   PNPM = 1,
   BUN = 2,
-  NONE = 3,
+  YARN = 3,
+  NONE = 4,
 }
 
 interface NPMRegistryPackage {
+  time?: Record<string, string>;
   versions?: Record<
     string,
     {
@@ -54,6 +58,37 @@ interface NPMRegistryPackage {
       deprecated?: string;
     }
   >;
+}
+
+interface NPMViewPackage {
+  time?: Record<string, string>;
+  versions?: string[];
+}
+
+function filterVersionsByMinimumReleaseAge(
+  versions: Record<string, { deprecated?: string; version: string }>,
+  time: Record<string, string> | undefined,
+  minimumReleaseAge: number,
+): string[] {
+  if (minimumReleaseAge === 0 || time === undefined) {
+    return Object.values(versions)
+      .filter(({ deprecated }) => deprecated === undefined)
+      .map(({ version }) => version);
+  }
+
+  const minimumReleaseTime = Date.now() - minimumReleaseAge * 60 * 60 * 1000;
+
+  return Object.values(versions)
+    .filter(({ deprecated, version }) => {
+      const releaseTime = Date.parse(time[version] ?? "");
+
+      // Keep versions without valid registry timestamps. This is common for
+      // private registries, and hiding them would make the setting unreliable.
+      return (
+        deprecated === undefined && (Number.isNaN(releaseTime) || releaseTime <= minimumReleaseTime)
+      );
+    })
+    .map(({ version }) => version);
 }
 
 // The `npm view` cache.
@@ -73,7 +108,7 @@ const getPackageManagerExecCache = singleton(() => new Cache<Record<string, bool
 // Return if asked Package Manager is installed.
 async function supportsPackageManager(
   document: TextDocument,
-  cmd: "bun" | "npm" | "pnpm",
+  cmd: "bun" | "npm" | "pnpm" | "yarn",
 ): Promise<boolean> {
   if (
     cacheEnabled() &&
@@ -127,34 +162,54 @@ const getPackagesAdvisoriesCache = singleton(() => new Map<string, Cache<Package
 // When the registry query fails, uses `npm view` as a fallback, which usually
 // happens when the package needs authentication. In this case, we'll let `npm`
 // handle it directly.
-async function fetchPackageVersions(name: string): Promise<string[] | null> {
+async function fetchPackageVersions(
+  name: string,
+  minimumReleaseAge: number,
+): Promise<string[] | null> {
   const data = await requestSafe<NPMRegistryPackage>({
-    headers: { Accept: "application/vnd.npm.install-v1+json" },
+    // The compact install response omits `time`, which is required to apply
+    // a minimum release age. Request the complete package metadata instead.
+    headers: { Accept: "application/json" },
     url: `https://registry.npmjs.org/${name}`,
   });
 
   if (data?.versions) {
-    return Object.values(data.versions)
-      .filter(({ deprecated }) => deprecated === undefined)
-      .map(({ version }) => version);
+    return filterVersionsByMinimumReleaseAge(data.versions, data.time, minimumReleaseAge);
   }
 
   return attempt(
     async () => {
-      const stdout = await execAsync(`npm view --json ${name} versions`);
+      const stdout = await execAsync(`npm view --json ${name} versions time`);
+      const packageView = parseAs<NPMViewPackage>(stdout);
 
-      return parseAs<string[]>(stdout) ?? null;
+      if (!packageView?.versions) {
+        return null;
+      }
+
+      return filterVersionsByMinimumReleaseAge(
+        Object.fromEntries(packageView.versions.map((version) => [version, { version }])),
+        packageView.time,
+        minimumReleaseAge,
+      );
     },
     () => null,
   );
 }
 
 // Get all package versions through `npm view` command.
-export async function getPackageVersions(name: string): Promise<string[] | null> {
+export async function getPackageVersions(
+  name: string,
+  document?: TextDocument,
+  applyMinimumReleaseAge = true,
+): Promise<string[] | null> {
+  const minimumReleaseAge = Math.max(
+    applyMinimumReleaseAge ? getMinimumReleaseAge() : 0,
+    applyMinimumReleaseAge && document ? await getPackageManagerMinimumReleaseAge(document) : 0,
+  );
   // If the package query is in the cache (even in the process of being executed), return it.
   // This ensures that we will not have duplicate execution process while it is within lifetime.
   if (cacheEnabled()) {
-    const cachePackages = getPackagesCache().get(name);
+    const cachePackages = getPackagesCache().get(`${minimumReleaseAge}:${name}`);
 
     if (cachePackages?.isValid(getCacheLifetime()) === true) {
       return cachePackages.value;
@@ -164,9 +219,9 @@ export async function getPackageVersions(name: string): Promise<string[] | null>
   // We'll use Registry NPM to get the versions directly from the source.
   // This avoids loading processes via `npm view`.
   // The process is cached if it is triggered quickly, within lifetime.
-  const execPromise = fetchPackageVersions(name);
+  const execPromise = fetchPackageVersions(name, minimumReleaseAge);
 
-  getPackagesCache().set(name, new Cache(execPromise));
+  getPackagesCache().set(`${minimumReleaseAge}:${name}`, new Cache(execPromise));
 
   return execPromise;
 }
@@ -216,6 +271,10 @@ export async function getPackageManager(document: TextDocument): Promise<Package
     return setPackageManager(PackageManager.BUN);
   }
 
+  if ((await exists(`${cwd}/yarn.lock`)) && (await supportsPackageManager(document, "yarn"))) {
+    return setPackageManager(PackageManager.YARN);
+  }
+
   // In last case, check for NPM.
   if (await supportsPackageManager(document, "npm")) {
     return setPackageManager(PackageManager.NPM);
@@ -223,6 +282,129 @@ export async function getPackageManager(document: TextDocument): Promise<Package
 
   // None available Package Manager supported.
   return setPackageManager(PackageManager.NONE);
+}
+
+const MINUTES_IN_HOUR = 60;
+
+const packageManagerMinimumReleaseAgeCaches = new Map<string, Cache<Promise<number>>>();
+
+export function parsePackageManagerMinimumReleaseAge(
+  packageManager: PackageManager,
+  configuration: string,
+): number {
+  const match =
+    packageManager === PackageManager.NPM
+      ? /^\s*min-release-age\s*=\s*(\d+(?:\.\d+)?)/m.exec(configuration)
+      : packageManager === PackageManager.PNPM
+        ? /^\s*minimumReleaseAge\s*:\s*(\d+(?:\.\d+)?)/m.exec(configuration)
+        : packageManager === PackageManager.BUN
+          ? /^\s*minimumReleaseAge\s*=\s*(\d+(?:\.\d+)?)/m.exec(configuration)
+          : /^\s*npmMinimalAgeGate\s*:\s*["']?([\d.]+\s*[smhdw]?)/m.exec(configuration);
+
+  if (!match?.[1]) {
+    return 0;
+  }
+
+  const value = Number.parseFloat(match[1]);
+
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  if (packageManager === PackageManager.NPM) {
+    return value * 24;
+  }
+
+  if (packageManager === PackageManager.PNPM) {
+    return value / MINUTES_IN_HOUR;
+  }
+
+  if (packageManager === PackageManager.BUN) {
+    return value / (MINUTES_IN_HOUR * MINUTES_IN_HOUR);
+  }
+
+  const unit = match[1].trimEnd().at(-1);
+  const unitHours: Record<string, number> = {
+    d: 24,
+    h: 1,
+    m: 1 / 60,
+    s: 1 / 3600,
+    w: 168,
+  };
+
+  return value * (unitHours[unit ?? "m"] ?? 1 / 60);
+}
+
+async function getPackageManagerMinimumReleaseAge(document: TextDocument): Promise<number> {
+  const packageManager = await getPackageManager(document);
+  const cwd = dirname(document.uri.fsPath);
+  const cache = packageManagerMinimumReleaseAgeCaches.get(cwd);
+
+  if (cacheEnabled() && cache?.isValid(getCacheLifetime()) === true) {
+    return cache.value;
+  }
+
+  const configCommand =
+    packageManager === PackageManager.NPM
+      ? "npm config get min-release-age"
+      : packageManager === PackageManager.PNPM
+        ? "pnpm config get minimumReleaseAge"
+        : packageManager === PackageManager.YARN
+          ? "yarn config get npmMinimalAgeGate"
+          : undefined;
+
+  if (configCommand) {
+    const configPromise = attempt(
+      async () =>
+        parsePackageManagerMinimumReleaseAge(
+          packageManager,
+          `${
+            packageManager === PackageManager.NPM
+              ? "min-release-age="
+              : packageManager === PackageManager.PNPM
+                ? "minimumReleaseAge: "
+                : "npmMinimalAgeGate: "
+          }${(await execAsync(configCommand, { cwd })).trim()}`,
+        ),
+      () => 0,
+    );
+
+    packageManagerMinimumReleaseAgeCaches.set(cwd, new Cache(configPromise));
+
+    return configPromise;
+  }
+
+  const configurationFile = packageManager === PackageManager.BUN ? "bunfig.toml" : undefined;
+
+  if (!configurationFile) {
+    return 0;
+  }
+
+  const configPromise = (async () => {
+    const projectConfiguration = await attempt(
+      async () => readFile(`${cwd}/${configurationFile}`, "utf8"),
+      () => "",
+    );
+    const projectMinimumReleaseAge = parsePackageManagerMinimumReleaseAge(
+      packageManager,
+      projectConfiguration,
+    );
+
+    if (/^\s*minimumReleaseAge\s*=/m.test(projectConfiguration)) {
+      return projectMinimumReleaseAge;
+    }
+
+    const globalConfiguration = await attempt(
+      async () => readFile(`${homedir()}/.bunfig.toml`, "utf8"),
+      () => "",
+    );
+
+    return parsePackageManagerMinimumReleaseAge(packageManager, globalConfiguration);
+  })();
+
+  packageManagerMinimumReleaseAgeCaches.set(cwd, new Cache(configPromise));
+
+  return configPromise;
 }
 
 export const packagesInstalledCaches = new Map<
@@ -378,7 +560,7 @@ export async function getPackagesAdvisories(
 
       // We need to push all versions to the NPM Registry.
       // Thus, we can check in real time when the package version is modified by the user.
-      return getPackageVersions(packageInfo.name).then((packageVersions) => {
+      return getPackageVersions(packageInfo.name, undefined, false).then((packageVersions) => {
         if (!packageVersions) {
           throw new Error("No package versions found");
         }

@@ -26,6 +26,7 @@ them. Fully compatible with **npm**, **pnpm** and **bun**.
 | Setting                                        | Description                                                                 |
 | ---------------------------------------------- | --------------------------------------------------------------------------- |
 | `npm-outdated-plus.level`                      | Minimum semver bump to show a package as outdated (major, minor, or patch). |
+| `npm-outdated-plus.minimumReleaseAge`          | Additional release age in hours (leave empty or use `0` to disable only this extension setting); stricter npm, pnpm, Bun, or Yarn project/global policies override it. |
 | `npm-outdated-plus.decorations`                | Display style: `fancy` (colorful), `simple` (minimal), or `disabled`.       |
 | `npm-outdated-plus.identifySecurityAdvisories` | Enable security advisory detection.                                         |
 | `npm-outdated-plus.majorUpdateProtection`      | Avoid suggesting direct major version upgrades.                             |

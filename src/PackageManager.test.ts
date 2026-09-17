@@ -5,6 +5,7 @@ import { vi } from "vitest";
 
 import { MockedModules } from "#/MockedModules";
 import type { ExecCallback } from "#/MockedModules";
+import { PackageManager, parsePackageManagerMinimumReleaseAge } from "#/PackageManager";
 import { vscodeSimulator } from "#/TestUtils";
 
 vi.mock(import("node:child_process"), async (importOriginal) => {
@@ -43,6 +44,8 @@ vi.mock(import("node:fs/promises"), async (importOriginal) => {
     ...actual,
     access: async (file: string): Promise<void> =>
       MockedModules.fsPromisesAccess?.(file) ?? actual.access(file),
+    readFile: async (file: string): Promise<string> =>
+      MockedModules.fsPromisesReadFile?.(file) ?? actual.readFile(file, "utf-8"),
   } as unknown as typeof actual;
 });
 
@@ -90,5 +93,16 @@ describe("package manager exec regression", () => {
 
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics.at(0)?.message).toContain("Newer version");
+  });
+});
+
+describe("minimum release age configuration", () => {
+  it.each<[PackageManager, string, number]>([
+    [PackageManager.NPM, "min-release-age=2", 48],
+    [PackageManager.PNPM, "minimumReleaseAge: 120", 2],
+    [PackageManager.BUN, "minimumReleaseAge = 7200", 2],
+    [PackageManager.YARN, "npmMinimalAgeGate: 2h", 2],
+  ])("normalizes %s configuration to hours", (packageManager, configuration, expected) => {
+    expect(parsePackageManagerMinimumReleaseAge(packageManager, configuration)).toBe(expected);
   });
 });

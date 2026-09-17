@@ -4,6 +4,8 @@
   "npm-outdated-plus.configuration.level.minor.description": "Somente exibirá um aviso de atualização quando houver uma atualização para versão minor (ex. de 1.0.0 para 1.1.0).",
   "npm-outdated-plus.configuration.level.patch.description": "Somente exibirá um aviso de atualização quando houver uma atualização para versão patch (ex. de 1.0.0 para 1.0.1).",
 
+  "npm-outdated-plus.configuration.minimumReleaseAge.description": "Idade mínima adicional, em horas, para que uma versão de dependência seja sugerida como atualização. Deixe em branco ou defina como `0` para desativar apenas este filtro da extensão. Uma política mais restritiva do npm, pnpm, Bun ou Yarn na configuração do projeto ou na configuração global substitui esta definição; altere a definição desse gerenciador de dependências para desativá-la.",
+
   "npm-outdated-plus.configuration.doItForMeAction.description": "O que deverá ser feito ao clicar no botão de atualização.",
   "npm-outdated-plus.configuration.doItForMeAction.install.description": "Executar o comando `install` do gerenciador de dependências.",
   "npm-outdated-plus.configuration.doItForMeAction.update.description": "Executar o comando `update` do gerenciador de dependências.",

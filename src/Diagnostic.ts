@@ -83,7 +83,7 @@ async function detectAdvisoryDiagnostics(
     ];
 
     // Filters available versions that are not affected by any type of advisory.
-    const versionsNotAffected = (await packageInfo.getVersions())!.filter((packageVersion) => {
+    const versionsNotAffected = (await packageInfo.getVersions(false))!.filter((packageVersion) => {
       if (prerelease(packageVersion)) {
         return false;
       }
